@@ -1,0 +1,748 @@
+LIB "solve.lib"; LIB "linalg.lib"; LIB "rinvar.lib"; LIB "primdec.lib"; LIB "foliation.lib";
+//---------------------------------------------------------------------------
+//---------------------------GENERAL PROCEDURES------------------------------
+//---------------------------------------------------------------------------
+proc Eigenvect (matrix M)
+"USAGE:
+     Eigenvect (matrix_expression)    
+PURPOSE: 
+     Compute the eigenvectors and eigenvalues of the matrix M.
+RETURN:
+     Ring R2 where the characteristic polynomial pf M has solutions.
+     List of eigenvalues: EVal (the roots of the polynomials in variable v(1))
+     List of eignvectors: EVect 
+SEE ALSO:
+     KrylovSub
+EXAMPLE: 
+     example eigenvect; shows an example
+"
+{
+if (size(M)==1)
+{
+     def R2=basering; number EVal=number(M[1,1]); number EVect=1;
+     export(EVal); export(EVect);
+     return(R2);     
+}
+if (nrows(M)!=ncols(M)) {"// ** The matrix is not square **";}
+if (size(M)>1 and nrows(M)==ncols(M))
+{    
+     int i; int j; int k;
+     int N=nrows(M);
+     def R1=basering; setring R1;
+     ring Raux=0, (v(1)), lp; matrix M=imap(R1,M); list EV=eigenvals(M);  // Compute the Eigenvalues in the variable v(1)
+     ring R2=(complex,20,sqrt(-1)), (v(1..N)), lp;
+     list EVal=imap(Raux,EV); int S=size(EVal[2]);
+     matrix M=imap(R1,M);
+     matrix V[N][1];  list EVect;
+     for (j=1; j<=N; j=j+1)
+     {
+          V[j,1]=v(j);                          // Vector of variable v(1)...v(n): MV=eigenvalue*V  (Eq 1)
+     } 
+     int l=1;
+     list L; list laux;  
+     def R;
+     ideal I; poly f;
+     matrix u[N][1];
+     for (i=1; i<=S; i=i+1)
+     {
+          f=EVal[1][i];
+          if (dim(std(f))<0 or f==0) {L=f;}
+          else {L=laguerre_solve(f,8,30,0,0);} // Solutions of char. poly. of M
+          for (j=1; j<=size(L); j=j+1)
+          {
+               I=M*V-V*L[j]; I=std(I);
+               k=1;
+               while(dim(I)>0)
+               {
+                    if (dim(I,v(k)-1)>=0)     // Intersect the Eq 1, with equations v(i)=1 (choose some solution of Eq 1)
+                    {
+                         I=I,v(k)-1;
+                         I=std(I);
+                    } 
+                    k=k+1;
+               }
+               R=lex_solve(std(I),10);
+	       laux=imap(R,rlist); 
+               for (k=1; k<=N; k=k+1)
+               {
+                    u[k,1]=laux[1][k];
+               }	
+               EVect[l]=u;
+               l=l+1;
+           }
+     }
+     export(EVal);
+     export(EVect);
+     return(R2);
+}
+}
+example
+{"EXAMPLE:"; echo=2;
+     ring r=0, (x),dp;
+     matrix M[2][2]=1,2,1,1;
+     def r1=Eigenvect(M);
+     print(M);
+     setring r1;
+     EVal;
+     EVect;  
+}
+//--------------------------------------------------------------------------
+proc JoinVectL (intvec m, intvec v)
+"USAGE:
+     JoinVectL (intvec_expression, intvec_expression)    
+PURPOSE: 
+     Compute the vector in the cannonical basis assocaited to the 
+     join cylce determined by v, in the basis of D. Lopez Garcia's thesis.
+
+     We consider the homology of the fiber of the polynomial
+         f:=x_1^m[1]+x_2^m[2]+...+x_{n+1}^m[n+1]. 
+     Thus, m[i] is the degree of the variable x_i.
+
+     The vector entry v[i] is the index in the 0-Dynkin diagram
+     associated to  x_i^m[i]. We consider a perturbation of x_i^m[i]
+       h_E(x_i)=x_i^m[i]+E*p(x_i) for E>0 small enough and poly. p,
+     similar to the Lemma 3.4.2 of Lopez's thesis.
+     The critical values c_1, c_2,..., c_(mi-1) are reals, and the order 
+     of the index is the given by the order of the real line. 
+     Moreover, the 0-Dynkin diagram looks like:
+          c_L---c_1---c_{L+1}---c_2---c_{L+2}---c_3....
+     where L=floor((m[i]-1)/2)+1.
+
+     Let D_i be the vanishing cycle associated to c_i. This procedure
+     computes the vector associated to the join cycle D:=D_1*D_2...*D_(n+1).
+     
+     The basis of the join cycles is defined by the next order: 
+     The first element is associated to the critical value
+           c^(1)_L+c^(2)_L+...+c^(n+1)_L, 
+     where c^(i)_j is the j critical value of x_i. Then we continue with the 
+     critical values varying the term associated to x_{n+1} in the order of 
+     the 0 Dynkin diagram i.e., 
+     c^(1)_L+c^(2)_L+...+c^(n+1)_1, c^(1)_L+c^(2)_L+...+c^(n+1)_{L+1},...
+     Next, we do the same with the terms associated to x_{n},  and after 
+     with x_{n-1} and so on.                    
+RETURN:
+     The position Pos, which is different to zero in the vector 
+                      (0,0,..1,0,..,0).
+SEE ALSO: 
+     JoinVectM
+EXAMPLE: 
+     example JoinVectL; shows an example
+"
+{
+if (size(m)!=size(v)) {"// ** The sizes are different**";}
+if (size(m)==size(v) and !(v<=m)) {"// ** v[i] is not <= m[i]**";}
+if (size(m)==size(v) and v<=m)
+{
+     int i; int j;
+     int n=size(m)-1;
+     list h;  // Number of negative critical values
+     list ms; // Number of critical values
+     for (i=1; i<=n+1; i=i+1)
+     {
+          h[i]=(m[i]-1) div 2;
+          ms[i]=(m[i]-1);  // m_i-1
+     }
+     int M=(sort(m))[1][n+1];
+     // We define the subindex I=I_m1 x I_m2 x ....
+     matrix I[M-1][n+1];
+     for (i=1; i<=n+1; i=i+1)
+     {
+          for (j=1; 2*j-1<=m[i]-1; j=j+1) 
+          { 
+               I[2*j-1,i]=h[i]+j;
+               if (2*j<=m[i]-1)
+               {
+	       I[2*j,i]=j;
+               }
+          }
+     } 
+     int Pos;
+     for (i=1; i<=n+1; i=i+1)
+     {
+          for (j=1; j<=nrows(I); j=j+1)
+          {
+               if (I[j,i]==v[i])
+               {
+                    Pos=Pos+(j-1)*product(ms,i+1..n+1);
+               }
+          }
+     }
+     Pos=Pos+1;
+     return(Pos);
+}
+}
+example
+{"EXAMPLE:"; echo=2;
+     ring r=0, (x),dp;
+     intvec m=4,4,4; // The 1-Dynkin diagram is a cubic of 27 vertex. 
+                     // Each 0-diagram is: c2---c1---c3
+     intvec v=1,2,3; // This is the position c3 in x, c2 in y and c1 in z. 
+     int Pos=JoinVectL(m,v);
+     Pos;
+     //In format of vector of length 27=(m[1]-1)(m[2]-1)(m[3]-1)
+     matrix vout[1][27]; vout[1,Pos]=1;
+     print(vout);
+}
+//--------------------------------------------------------------------------
+proc VectJoinL (intvec m, matrix v)
+"USAGE:
+     VectJoinL (intvec_expression, matrix_expression); 
+     nrows(v)=1; v[i]<=dim. of the homology.    
+PURPOSE: 
+     Compute the corresponding index of the critical values of each
+     coordinates of the polynomial f:=x_1^m[1]+x_2^m[2]+...+x_{n+1}^m[n+1];
+     associated to the V(j)=(0,0,..1,0,..,0) with 1 in the position v[i].
+     This is done in the basis of of D. Lopez Garcia's thesis.
+RETURN:
+     The index of the criticals values of the 0-Dynkin diagram.
+NOTE:
+     This procedure can be thought as the inverse of JontVectL.
+SEE ALSO: 
+     JoinVectL
+EXAMPLE: 
+     example VectJoinL; shows an example
+"
+{
+int i; int j;  
+int n=size(m)-1;
+list h;  // Number of negative critical values
+list ms; // Number of critical values
+for (i=1; i<=n+1; i=i+1)
+{
+     h[i]=(m[i]-1) div 2;
+     ms[i]=(m[i]-1);  // m_i-1
+}
+int M=(sort(m))[1][n+1];
+// We define the subindex I=I_m1 x I_m2 x ....
+matrix I[M-1][n+1];
+for (i=1; i<=n+1; i=i+1)
+{
+     for (j=1; 2*j-1<=m[i]-1; j=j+1) 
+     { 
+          I[2*j-1,i]=h[i]+j;
+          if (2*j<=m[i]-1) {I[2*j,i]=j;}
+     }
+} 
+int L=product(ms); // Dimension of the homology
+int S=ncols(v); int Pos; int p;
+if (nrows(v)>1) {"// ** The sizes are incompatible**";}
+else
+{
+     matrix vout[S][n+1];
+     for (i=1; i<=S; i=i+1)
+     {
+          if (v[1,i]>L) {"// ** Position should be less than the dimension of homology**";}
+          else
+          {
+               Pos=int(v[1,i])-1;
+               for (j=1; j<=n+1; j=j+1)
+               {
+                    p=Pos div product(ms,j+1..n+1);
+                    Pos=int(Pos-p*product(ms,j+1..n+1));  
+                    vout[i,j]=I[p+1,j];
+               }
+          }
+     }
+     return(vout);
+}
+}
+example
+{"EXAMPLE:"; echo=2;
+     ring r=0, (x),dp;
+     intvec m=4,4,4;
+     matrix v[1][27]=transpose(1..27);
+     matrix vc_zero_dim=VectJoinL(m,v);
+     print(vc_zero_dim);
+}
+//--------------------------------------------------------------------------
+proc IntMatrixL (intvec m)
+"USAGE:
+     IntMatrixL (intvec_expression); m[i]>=2
+PURPOSE: 
+     Compute the intersection matrix of polynomial:
+         f:=x_1^m[1]+x_2^m[2]+...+x_{n+1}^m[n+1].
+     This matrix is in the basis of D. Lopez Garcia's thesis.
+RETURN:
+     matrix of intersection ImL    
+SEE ALSO: 
+     JoinVectL, IntMatrixM, MonMatrixL, MonMatrixL    
+EXAMPLE: 
+     example IntMatrixL; shows an example    
+"
+{
+int i; int j; int k; int Ni; int Nj;
+int n=size(m)-1;
+list h;  // Number of negative critical values
+list ms; // Number of critical values
+for (i=1; i<=n+1; i=i+1)
+{
+     h[i]=(m[i]-1) div 2;
+     ms[i]=(m[i]-1);  // m_i-1
+}
+int M=(sort(m))[1][n+1];
+// We define the subindex I=I_m1 x I_m2 x ....
+matrix I[M-1][n+1];
+for (i=1; i<=n+1; i=i+1)
+{
+     for (j=1; 2*j-1<=m[i]-1; j=j+1) 
+     { 
+          I[2*j-1,i]=h[i]+j;
+          if (2*j<=m[i]-1) {I[2*j,i]=j;}
+     }
+} 
+int L=product(ms); // Dimension of the homology
+// Inteserction matrix in Lopez basis. ImL
+matrix ImL[L][L]; 
+matrix Bi[1][n+1]; matrix Bj[1][n+1]; //Matrices B and Bprime
+list Bcompa;  // Comparison between betas
+list Bexp;    // B exponent: If Bi[k]==Bj[k], then it does not change the sign.
+int ni; int nj;
+for (i=1; i<=L; i=i+1)
+{
+     for (j=1; j<=L; j=j+1)
+     {    
+          Ni=i-1; Nj=j-1; 
+          for (k=1; k<=n+1; k=k+1)
+          {
+          //Define the beta and beta' acording to: Ni=a_1(Pi_j>1(m_j-1))+a_2(Pi_j>2(m_j-1))+... ak<m_k-2
+          ni=Ni div product(ms,k+1..n+1); nj=Nj div product(ms,k+1..n+1); 
+          Ni=int(Ni-ni*product(ms,k+1..n+1));  Nj=int(Nj-nj*product(ms,k+1..n+1)); 
+          Bi[1,k]=I[ni+1,k]; Bj[1,k]=I[nj+1,k];
+          Bcompa[k]=((Bi[1,k]+h[k]==Bj[1,k] or Bi[1,k]+h[k]+1==Bj[1,k]) and Bi[1,k]<=h[k] and Bj[1,k]>h[k]) or (Bi[1,k]==Bj[1,k]); // Comparison between betas
+          Bexp[k]=(Bi[1,k]!=Bj[1,k]);
+          } 
+          if (i != j and product(Bcompa))
+          {
+               ImL[i,j]=(-1)*(-1)^(n*(n-1) div 2)*(-1)^int(sum(Bexp));
+               ImL[j,i]=(-1)^n*ImL[i,j];  
+          }
+          if (i==j)
+          {
+               ImL[i,j]=(-1)^(n*(n-1) div 2)*(1+(-1)^n);
+          }
+     }
+}
+return(ImL);
+}
+example
+{"EXAMPLE:"; echo=2;
+     ring r=0, (x),dp;
+     intvec m=4,3;
+     matrix ImL=IntMatrixL (m);
+     print (ImL);
+}
+//--------------------------------------------------------------------------
+proc MonMatrixL (intvec m)
+"USAGE:
+     MonMatrixL (intvec_expression); m[i]>=2
+PURPOSE: 
+     Compute the monodromy matrix of polynomial:
+         f:=x_1^m[1]+x_2^m[2]+...+x_{n+1}^m[n+1].
+     This matrix is in the basis of D. Lopez Garcia's thesis. 
+RETURN:
+     matrix of monodromy MmL     
+SEE ALSO: 
+     IntMatrixL, IntMatrixM, MonMatrixM    
+EXAMPLE: 
+     example MonMatrixL; shows an example    
+    
+"
+
+{
+matrix ImL=IntMatrixL(m);
+int N=nrows(ImL); int n=size(m)-1;
+matrix Id[N][N];
+int j;
+for (j=1; j<=N; j=j+1)
+{
+     Id[j,j]=1;
+}
+matrix ML[N][N]=Id+(-1)^(n*(n+1) div 2)*ImL;
+return(ML);
+}
+example
+{"EXAMPLE:"; echo=2;
+     ring r=0, (x),dp;
+     intvec m=4,3;
+     matrix MmL=MonMatrixL (m);
+     print (MmL);
+}
+//---------------------------------------------------------------------------
+proc JoinVectM (intvec m, intvec v)
+"USAGE:
+     JoinVectM (intvec_expression, intvec_expression)    
+PURPOSE: 
+     Compute the vector in the cannonical basis which correspons with v,
+     in the basis of of H. Movasati's book.
+     m[i] is the degree of the variable x_i.
+     v[i] is the position in the Dynkin diagram of dimension 0.
+RETURN:
+     The position Pos, which is different to zero in the vector 
+                      (0,0,..1,0,..,0)
+SEE ALSO: 
+     JoinVectL
+EXAMPLE: 
+     example JoinVectM; shows an example
+"
+{
+if (size(m)!=size(v)) {"// ** The sizes are different**";}
+if (size(m)==size(v) and !(v<=m)) {"// ** v[i] is not <= m[i]**";}
+if (size(m)==size(v) and v<=m)
+{
+     int i; int j;
+     int n=size(m)-1;
+     list ms; // Number of critical values
+     for (i=1; i<=n+1; i=i+1)
+     {
+          ms[i]=(m[i]-1);  // m_i-1
+     }
+     int M=(sort(m))[1][n+1];
+     // We define the subindex I=I_m1 x I_m2 x ....
+     matrix I[M-1][n+1];
+     for (i=1; i<=n+1; i=i+1)
+     {
+          for (j=0; j<=m[i]-2; j=j+1) 
+          { 
+               I[j+1,i]=j;
+          }
+     } 
+     // We define the subindex I=I_m1 x I_m2 x ....
+     int Pos;
+     for (i=1; i<=n+1; i=i+1)
+     {
+          for (j=1; j<=nrows(I); j=j+1)
+          {
+               if (I[j,i]==v[i])
+               {
+                    Pos=Pos+(j-1)*product(ms,i+1..n+1);
+               }
+          }
+     }
+     Pos=Pos+1;
+     return(Pos);
+}
+}
+example
+{"EXAMPLE:"; echo=2;
+     ring r=0, (x),dp;
+     intvec m=4,4;
+     intvec v=0,0;
+     int Pos=JoinVectM(m,v);
+     Pos;
+     //In format of vector of length 9=(m[1]-1)(m[2]-1)
+     matrix vout[1][9]; vout[1,Pos]=1;
+     print(vout);
+}
+//--------------------------------------------------------------------------
+proc IntMatrixM (intvec m)
+"USAGE:
+     IntMatrixM (intvec_expresion); m[i]>=2
+PURPOSE: 
+     Compute the intersection matrix of polynomila:
+         f:=x_1^m[1]+x_2^m[2]+...+x_{n+1}^m[n+1].
+     This matrix is in the basis of H. Movasati's book.
+RETURN:
+     matrix of intersection ImM    
+SEE ALSO: 
+     IntMatrixL, MonMatrixL, MonMatrixM    
+EXAMPLE: 
+     example IntMatrixM; shows an example    
+    
+"
+{
+int i; int j; int k; int Ni; int Nj;
+int n=size(m)-1;
+int M=(sort(m))[1][n+1];
+list ms; // Number of critical values
+for (j=1; j<=n+1; j=j+1)
+{
+     ms[j]=(m[j]-1);  // m_i-1
+}
+int L=product(ms); // Dimension of the homology
+
+// Inteserction matrix in Movasati basis. ImM
+matrix ImM[L][L]; 
+matrix Bi[1][n+1]; matrix Bj[1][n+1]; //Matrices B and Bprime
+list Bcompa; list Bcompaone; // Comparison between betas
+for (i=1; i<=L; i=i+1)
+{
+     for (j=1; j<=L; j=j+1)
+     {    
+          Ni=i-1; Nj=j-1; 
+          for (k=1; k<=n+1; k=k+1)
+          {
+          //Define the beta and beta' acording to: Ni=a_1(Pi_j>1(m_j-1))+a_2(Pi_j>2(m_j-1))+... ak<m_k-2
+          Bi[1,k]=Ni div product(ms,k+1..n+1); Bj[1,k]=Nj div product(ms,k+1..n+1); 
+          Ni=int(Ni-Bi[1,k]*product(ms,k+1..n+1));  Nj=int(Nj-Bj[1,k]*product(ms,k+1..n+1)); 
+          Bcompa[k]=(Bi[1,k]<=Bj[1,k]); Bcompaone[k]=(Bj[1,k]<=Bi[1,k]+1); // Comparison between betas
+          } 
+          if (i != j and product(Bcompa)==1 and product(Bcompaone)==1)
+          {
+               ImM[i,j]=(-1)^(n*(n-1) div 2)*(-1)^int((sum(Bj-Bi)));
+               ImM[j,i]=(-1)^n*ImM[i,j];  
+          }
+          if (i==j)
+          {
+               ImM[i,j]=(-1)^(n*(n-1) div 2)*(1+(-1)^n);
+          }
+     }
+}
+
+return(ImM);
+}
+example
+{"EXAMPLE:"; echo=2;
+     ring r=0, (x),dp;
+     intvec m=4,3;
+     matrix ImM=IntMatrixM (m);
+     print (ImM);
+}
+//--------------------------------------------------------------------------
+proc MonMatrixM (intvec m)
+"USAGE:
+     MonMatrixM (intvec_expression); m[i]>=2
+PURPOSE: 
+     Compute the monodromy matrix of polynomial:
+         f:=x_1^m[1]+x_2^m[2]+...+x_{n+1}^m[n+1].
+     This matrix is in the basis of H. Movasati's book. 
+RETURN:
+     matrix of monodromy MmM     
+SEE ALSO: 
+     IntMatrixL, IntMatrixM, MonMatrixL    
+EXAMPLE: 
+     example MonMatrixM; shows an example  
+"
+{
+int j;
+matrix ImM=IntMatrixM(m);
+int N=nrows(ImM); int n=size(m)-1;
+matrix Id[N][N];
+for (j=1; j<=N; j=j+1)
+{
+     Id[j,j]=1;
+}
+matrix MM[N][N]=Id+(-1)^(n*(n+1) div 2)*ImM;
+return(MM);
+}
+example
+{"EXAMPLE:"; echo=2;
+     ring r=0, (x),dp;
+     intvec m=4,3;
+     matrix MmM=MonMatrixM (m);
+     print (MmM);
+}
+//--------------------------------------------------------------------------
+proc KrylovSub (matrix M, int Pos)
+"USAGE:
+     KrylovSub (matrix_expression, int_expression); 
+     M is a square matrix; Pos<= number of rows M. 
+PURPOSE: 
+     Compute the Krylov subspace of M and the vector whose only one is in Pos
+     i.e., v0:=(0,0,...,1,0,...0)
+RETURN:
+     Ring R2 where the subspaces is supported.
+     Matrix Ks: The columns are basis for the Krylov subspace.
+     Matrix Vc: The columns correspons with the canonical vectors in Ks. 
+     Matrix Vcn: Any number Vcn[j] is the position of the vector Vc[j]
+                 which is equal to 1.
+NOTE:
+     If M is the monodromy matrix associated to the polynomial 
+          f:=x_1^m[1]+x_2^m[2]+...+x_{n+1}^m[n+1]; then
+     the columns of Vc are the vanishing cycles in the orbit Mon(v0).             
+SEE ALSO:
+     Eigenvect
+EXAMPLE: 
+     example KrylovSub; shows an example
+"
+
+{
+if (size(M)==1 and Pos==1)
+{
+     def R2=basering; number Ks=1; number Vc=1;
+     export(Ks); export(Vc);
+     return(R2);     
+}
+if (nrows(M)!=ncols(M)) {"// ** The matrix is not square **";}
+if (nrows(M)==ncols(M) and Pos>nrows(M)) {"// ** Pos should be less than the number of rows **";}
+if (size(M)>1 and nrows(M)==ncols(M) and Pos<=nrows(M))
+{
+     int i; int j; int l; int S;
+     int N=nrows(M); 
+     def R2=Eigenvect(M);
+     setring R2;
+     list ind;
+     int NE=size(EVect);
+     if (NE<N){"// ** The number of diff. eigenvalues is less than the rows of the matrix **";}
+     else
+     {
+          matrix U[N][N]; // Matrix with the eigenvectors as columns.
+          for (i=1; i<=N; i=i+1)
+          {
+               for (j=1; j<=N; j=j+1)
+               {
+                    U[i,j]=number(EVect[j][i,1]);
+               } 
+          }
+          matrix W=inverse(U);
+          ind=0; l=1;
+          for (i=1; i<=N; i=i+1)
+          {
+               if (W[i,Pos]==0) {ind[l]=i; l=l+1;}
+          }
+          S=size(ind);
+          matrix Ur=U;
+          if (ind[1]!=0)
+          {
+               for (i=1; i<=N; i=i+1)
+               {
+                    for (j=1; j<=S; j=j+1)
+                    {
+                         Ur[i,ind[j]]=0;
+                    }
+               }
+          }
+          matrix Ks0=Ur*W; // Basis for the Krilov subspace
+          // We choose the  linear independt columns:
+          list Z=gaussred(Ks0); j=0;
+          ind=0; l=1;
+          for (i=1; i<=N; i=i+1)
+          {
+               if (Z[3][i-j,i]==0) {j=j+1;}
+               else {ind[l]=i; l=l+1;}
+          }
+          S=size(ind);
+          matrix Ks[N][S];
+          for (i=1; i<=S; i=i+1)
+          {
+               Ks[1..N,i]=Ks0[1..N,ind[i]];
+          }
+          // Vanishing cycles in Ks:
+          ind=0; l=1; int Suma;
+          for (j=1; j<=S; j=j+1)
+          {
+               Suma=0;
+               for (i=1; i<=N; i=i+1)
+               {
+                    if (Ks[i,j]!=0) {Suma=Suma+1;}
+               }       
+               if (Suma==1) {ind[l]=j; l=l+1;}
+          }
+          matrix Vc[N][size(ind)];
+          matrix Vcn[1][size(ind)];
+          for (j=1; j<=size(ind); j=j+1)
+          {
+               Vc[1..N,j]=Ks[1..N, ind[j]];
+               for (i=1; i<=N; i=i+1)
+               {
+                    if (Vc[i,j]==1) {Vcn[1,j]=i;}
+               }    
+          }
+          export (U); export(W); export(Ur); export(Ks0); export(ind);
+          export (Ks); export (Vc); export (Vcn);
+          return(R2);
+     }     
+}
+}
+example
+{"EXAMPLE:"; echo=2;
+     ring r=0,x,lp;
+     intvec m=4,3;
+     matrix Mon=MonMatrixL(m);
+     def r2=KrylovSub(Mon,3);
+     setring r2;
+     print(Ks);
+     print(Vc);
+     print(Vcn);
+}
+//--------------------------------------------------------------------------
+proc SpaceCVD (int d, intvec ddd)
+"USAGE:
+     SpaceCVD (int_expression,intvec_expression); Sum(ddd)=d-1;    
+PURPOSE: 
+     Compute the components of the space of parameters of the polynomial
+     of degree d (one variable), with critical value degree.
+     For a definition see D. Lopez Garcia's thesis. 
+     The parameters of the polynomial are R(i), which is the coefficient
+     of x^i. 
+RETURN:
+     Ring Rout where is defined the corresponding ideals associated to 
+     the space of parameters.
+     The list Cp, is the lits of ideals. 
+NOTE:
+     ddd is a partition of d-1. 
+     By linear transformation we can consider r(d)=1, r(d-1)=0,  and r(0)=0,
+     thus the polynomial is:
+                F=x^d+R(d-2)x^(d-2)+R(d-3)x^(d-3)+...+R(1)x.
+EXAMPLE: 
+     example space_cvd; shows an example
+"
+{
+int i; int j;
+int D=(d-1); 
+ring R1=(0,r(1..d),c),(x),dp; //The polynomila's parameters are si, rj, and the variable x,y 
+// Definition of the polynomial F(x,y)=x^d+x^(d-2)r(d-2)+...y^d+y^(d-2)s(d):
+poly F=x^d; 
+for (i=1; i<=d-2; i=i+1)
+{
+     F=F+r(i)*x^i;
+}
+number disc=discriminant(F-c); 	poly disc2=substpar(disc,c,x); //We write the polynomial in the variable x.
+int S=int(coef(disc2,x)[2,1]);
+ring R2 = 0, (t(1..D)),lp;
+ideal Phi0=elemSymmId(D); //Polynomials of the image Phi (Vieta's formula) Phi.
+ideal Phi;
+for (i=1; i<=d-1; i=i+1)
+{
+ Phi[d-i]=(Phi0[i]*(-1)^i)/S;
+}
+//Here we specify the conditions on critival values degere:
+ideal I; int l=1; int h=1;
+for (i=1; i<=size(ddd); i=i+1)
+{
+     for (j=1; j<=ddd[i]-1;j=j+1)
+     {
+          I[l]=t(h)-t(h+j); 
+          l=l+1;        
+     }
+     h=h+j;
+}
+//Computing the image of I by the map Phi:
+def R3 = ImageVariety(I, Phi);
+setring R3;
+ideal Wa=imageid;
+// Ring where there are all variables and parameters:
+ring Rout =(0,r(1..d),c), (x,Y(1..D),R(1..d)),lp;	
+poly Disc1=imap(R1,disc2); 
+// It is necessary to pass from the parameters r,s to variables R,S:
+for (i=1; i<=d; i=i+1) 
+{
+     Disc1=subst(Disc1,r(i),R(i));
+}
+matrix M=coeffs(Disc1, x);	
+ideal W=imap(R3,Wa);          // Image variety
+ideal T=W;                    //Doing pullback
+for (i=1; i<=D; i=i+1)
+{
+ T=subst(T,Y(i),M[i,1]); 
+}	
+list Comp=primdecGTZ(T);       // Counting components  
+list Cp;                       // Just the prime ideal
+for (i=1; i<=size(Comp);i=i+1)
+{    
+     Cp[i]=Comp[i][2];
+}
+export(Cp);
+return(Rout);
+}
+example
+{"EXAMPLE:"; echo=2;
+     ring r=0,x,lp;
+     int d=4;
+     intvec ddd=2,1;
+     def r1=SpaceCVD(d,ddd);
+     setring(r1);
+     Cp;
+}
+//--------------------------------------------------------------------------
+
+
